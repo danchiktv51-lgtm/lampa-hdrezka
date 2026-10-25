@@ -180,10 +180,7 @@
         var url = proxify(getDomain() + '/ajax/login/?t=' + Date.now());
         var post = 'login_name=' + encodeURIComponent(login) +
                    '&login_password=' + encodeURIComponent(password) +
-                   '&login_not_save=0';
-
-        var net = new Lampa.Reguest();
-        net.timeout(15000);
+                   '&login_not_save=0&login=submit';
 
         // We need raw response WITH Set-Cookie. Lampa.Reguest does not always
         // expose headers, so we fall back to XHR directly.
@@ -192,7 +189,7 @@
             xhr.open('POST', url, true);
             xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
             xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-            xhr.setRequestHeader('Referer', getDomain() + '/');
+            // Referer is controlled by the browser and cannot be set by page JavaScript.
             xhr.withCredentials = true;
             xhr.timeout = 15000;
             xhr.onload = function () {
@@ -216,6 +213,12 @@
                         .filter(function (s) { return /^dle_(user_id|password|hash|forum_sessions)=/.test(s); })
                         .join('; ');
 
+                    if (!dle) {
+                        Lampa.Storage.set(STORAGE.cookie, '');
+                        Lampa.Storage.set(STORAGE.status, 'error:cookies-unavailable');
+                        cb(false, 'Сайт ответил, но сессионные cookies недоступны Lampa. Для входа нужен доверенный прокси с поддержкой сессии.');
+                        return;
+                    }
                     Lampa.Storage.set(STORAGE.cookie, dle);
                     Lampa.Storage.set(STORAGE.status, 'logged');
                     cb(true, 'Успешный вход');
@@ -225,8 +228,8 @@
                 }
             };
             xhr.onerror = function () {
-                Lampa.Storage.set(STORAGE.status, 'error:network');
-                cb(false, 'Сетевая ошибка');
+                Lampa.Storage.set(STORAGE.status, 'error:cors-or-network');
+                cb(false, 'Запрос заблокирован или недоступен: проверьте зеркало HDREZKA и CORS/прокси. Это не подтверждает ошибку пароля.');
             };
             xhr.ontimeout = function () {
                 Lampa.Storage.set(STORAGE.status, 'error:timeout');
@@ -279,8 +282,10 @@
                 var exact = items.filter(function (i) { return i.year == String(year); });
                 if (exact.length) items = exact;
             }
-            cb(items);
-        }, function () { cb([]); });
+            cb(items, null);
+        }, function () {
+            cb([], 'Не удалось загрузить результаты поиска: проверьте зеркало HDREZKA и доступ Lampa к нему (CORS/прокси).');
+        });
     }
 
     /* ====================================================
@@ -401,7 +406,7 @@
             xhr.open('POST', url, true);
             xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
             xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-            xhr.setRequestHeader('Referer', getDomain() + '/');
+            // Referer is controlled by the browser and cannot be set by page JavaScript.
             xhr.withCredentials = true;
             xhr.timeout = 15000;
             xhr.onload = function () {
@@ -592,10 +597,16 @@
             var title = movie.title || movie.name || '';
             var year = (movie.release_date || movie.first_air_date || '').slice(0, 4);
 
-            searchRezka(title, year, function (results) {
+            searchRezka(title, year, function (results, networkError) {
+                if (networkError) {
+                    self.activity.loader(false);
+                    showError(networkError);
+                    self.activity.toggle();
+                    return;
+                }
                 if (!results.length) {
                     self.activity.loader(false);
-                    showError('Ничего не найдено на HDREZKA');
+                    showError('По этому названию ничего не найдено на HDREZKA');
                     self.activity.toggle();
                     return;
                 }
